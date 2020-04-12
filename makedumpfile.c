@@ -11255,33 +11255,6 @@ int iomem_for_each_line(char *match,
 	return nr;
 }
 
-static int crashkernel_mem_callback(void *data, int nr,
-					  char *str,
-					  unsigned long base,
-					  unsigned long length)
-{
-	if (nr >= CRASH_RESERVED_MEM_NR)
-		return 1;
-
-	crash_reserved_mem[nr].start = base;
-	crash_reserved_mem[nr].end   = base + length - 1;
-	return 0;
-}
-
-int is_crashkernel_mem_reserved(void)
-{
-	int ret;
-
-	if (arch_crashkernel_mem_size())
-		return TRUE;
-
-	ret = iomem_for_each_line("Crash kernel\n",
-					crashkernel_mem_callback, NULL);
-	crash_reserved_mem_nr = ret;
-
-	return !!crash_reserved_mem_nr;
-}
-
 static int get_page_offset(void)
 {
 	if (!populate_kernel_version())
@@ -11329,11 +11302,6 @@ int show_mem_usage(void)
 {
 	uint64_t vmcoreinfo_addr, vmcoreinfo_len;
 	struct cycle cycle = {0};
-
-	if (!is_crashkernel_mem_reserved()) {
-		ERRMSG("No memory is reserved for crashkernel!\n");
-		return FALSE;
-	}
 
 	info->dump_level = MAX_DUMP_LEVEL;
 
