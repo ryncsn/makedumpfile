@@ -795,14 +795,33 @@ get_elf_loads(int fd, char *filename)
 		if (!get_phdr_memory(i, &phdr))
 			return FALSE;
 
+		if (phdr.p_type == PT_NOTE) {
+			set_pt_note(phdr.p_offset, phdr.p_filesz);
+		}
+
 		if (phdr.p_type != PT_LOAD)
 			continue;
+
+		if (j == 0) {
+			offset_pt_load_memory = phdr.p_offset;
+			if (offset_pt_load_memory == 0) {
+				ERRMSG("Can't get the offset of page data.\n");
+				return FALSE;
+			}
+		}
 
 		if (j >= num_pt_loads)
 			return FALSE;
 		if (!dump_Elf_load(&phdr, j))
 			return FALSE;
 		j++;
+	}
+
+	max_file_offset = 0;
+	for (i = 0; i < num_pt_loads; ++i) {
+		struct pt_load_segment *p = &pt_loads[i];
+		max_file_offset = MAX(max_file_offset,
+				      p->file_offset + p->phys_end - p->phys_start);
 	}
 
 	return TRUE;
@@ -903,15 +922,6 @@ int get_kcore_dump_loads(void)
 			return FALSE;
 		}
 
-		if (j == 0) {
-			offset_pt_load_memory = p->file_offset;
-			if (offset_pt_load_memory == 0) {
-				ERRMSG("Can't get the offset of page data.\n");
-				free(pls);
-				return FALSE;
-			}
-		}
-
 		pls[j] = *p;
 		j++;
 	}
@@ -923,13 +933,6 @@ int get_kcore_dump_loads(void)
 	for (i = 0; i < crash_reserved_mem_nr; i++)	{
 		exclude_segment(&pt_loads, &num_pt_loads,
 				crash_reserved_mem[i].start, crash_reserved_mem[i].end + 1);
-	}
-
-	max_file_offset = 0;
-	for (i = 0; i < num_pt_loads; ++i) {
-		struct pt_load_segment *p = &pt_loads[i];
-		max_file_offset = MAX(max_file_offset,
-				      p->file_offset + p->phys_end - p->phys_start);
 	}
 
 	DEBUG_MSG("%8s %16s %16s %16s %16s\n", "",
@@ -950,72 +953,18 @@ int get_kcore_dump_loads(void)
 int
 get_elf_info(int fd, char *filename)
 {
-	int i, j, phnum, elf_format;
-	Elf64_Phdr phdr;
+	get_elf_loads(fd, filename);
 
-	/*
-	 * Check ELF64 or ELF32.
-	 */
-	elf_format = check_elf_format(fd, filename, &phnum, &num_pt_loads);
-	if (elf_format == ELF64)
-		flags_memory |= MEMORY_ELF64;
-	else if (elf_format != ELF32)
-		return FALSE;
-
-	if (!num_pt_loads) {
-		ERRMSG("Can't get the number of PT_LOAD.\n");
-		return FALSE;
-	}
-
-	/*
-	 * The below file information will be used as /proc/vmcore.
-	 */
-	fd_memory   = fd;
-	name_memory = filename;
-
-	pt_loads = calloc(sizeof(struct pt_load_segment), num_pt_loads);
-	if (pt_loads == NULL) {
-		ERRMSG("Can't allocate memory for the PT_LOAD. %s\n",
-		    strerror(errno));
-		return FALSE;
-	}
-	for (i = 0, j = 0; i < phnum; i++) {
-		if (!get_phdr_memory(i, &phdr))
-			return FALSE;
-
-		if (phdr.p_type == PT_NOTE) {
-			set_pt_note(phdr.p_offset, phdr.p_filesz);
-		}
-		if (phdr.p_type != PT_LOAD)
-			continue;
-
-		if (j == 0) {
-			offset_pt_load_memory = phdr.p_offset;
-			if (offset_pt_load_memory == 0) {
-				ERRMSG("Can't get the offset of page data.\n");
-				return FALSE;
-			}
-		}
-		if (j >= num_pt_loads)
-			return FALSE;
-		if(!dump_Elf_load(&phdr, j))
-			return FALSE;
-		j++;
-	}
-	max_file_offset = 0;
-	for (i = 0; i < num_pt_loads; ++i) {
-		struct pt_load_segment *p = &pt_loads[i];
-		max_file_offset = MAX(max_file_offset,
-				      p->file_offset + p->phys_end - p->phys_start);
-	}
 	if (!has_pt_note()) {
 		ERRMSG("Can't find PT_NOTE Phdr.\n");
 		return FALSE;
 	}
+
 	if (!get_pt_note_info()) {
 		ERRMSG("Can't get PT_NOTE information.\n");
 		return FALSE;
 	}
+
 	return TRUE;
 }
 
