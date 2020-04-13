@@ -76,6 +76,7 @@ int get_nr_cpus(void);
 int has_pt_note(void);
 void set_pt_note(off_t offset, unsigned long size);
 void get_pt_note(off_t *offset, unsigned long *size);
+int get_pt_note_info();
 
 int has_vmcoreinfo(void);
 void set_vmcoreinfo(off_t offset, unsigned long size);

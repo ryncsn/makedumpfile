@@ -275,7 +275,7 @@ offset_note_desc(void *note)
 	return offset;
 }
 
-static int
+int
 get_pt_note_info(void)
 {
 	int n_type, size_name, size_desc;
