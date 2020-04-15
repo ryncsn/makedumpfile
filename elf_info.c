@@ -886,7 +886,7 @@ static int exclude_segment(struct pt_load_segment **pt_loads,
 }
 
 
-int get_kcore_dump_loads(void)
+int get_dump_loads(void)
 {
 	struct pt_load_segment	*pls;
 	int i, j, loads = 0;

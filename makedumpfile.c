@@ -4191,9 +4191,6 @@ out:
 	if (!is_xen_memory() && !cache_init())
 		return FALSE;
 
-	if (info->flag_mem_usage && !get_kcore_dump_loads())
-		return FALSE;
-
 	if (!info->flag_refiltering && !info->flag_sadump) {
 		if (!get_phys_base())
 			return FALSE;
@@ -11322,6 +11319,9 @@ int show_mem_usage(void)
 		return FALSE;
 
 	if (!set_kcore_vmcoreinfo(vmcoreinfo_addr, vmcoreinfo_len))
+		return FALSE;
+
+	if (!get_dump_loads())
 		return FALSE;
 
 	if (!initial())
