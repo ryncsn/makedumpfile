@@ -6632,7 +6632,7 @@ create_2nd_bitmap(struct cycle *cycle)
 	 *	 due to reading each page two times, but it is necessary.
 	 */
 	if ((info->dump_level & DL_EXCLUDE_ZERO) &&
-	    (info->flag_elf_dumpfile || info->flag_mem_usage || info->flag_mem_reuse)) {
+	    (info->flag_elf_dumpfile || info->flag_mem_usage) && !info->flag_mem_reuse) {
 		/*
 		 * 2nd-bitmap should be flushed at this time, because
 		 * exclude_zero_pages() checks 2nd-bitmap.
@@ -6650,7 +6650,7 @@ create_2nd_bitmap(struct cycle *cycle)
 		return FALSE;
 
 	/* --exclude-unused-vm means exclude vmemmap page structures for unused pages */
-	if (info->flag_excludevm && !info->flag_mem_reuse) {
+	if (info->flag_excludevm) {
 		if (!init_save_control())
 			return FALSE;
 		if (!find_unused_vmemmap_pages())
@@ -7423,10 +7423,14 @@ print_reusable_cyclic_single(int count)
 		}
 
 		for (pfn = cycle.start_pfn; pfn < cycle.end_pfn; pfn++) {
-			if (!is_dumpable(info->bitmap2, pfn, &cycle)) {
-				if (pfn_end == pfn - 1) {
-					pfn_end ++;
-					continue;
+			if (is_dumpable(info->bitmap1, pfn, &cycle)) {
+				/* Ensure it's not on a memory hole */
+				if (!is_dumpable(info->bitmap2, pfn, &cycle)) {
+					/* Usable region */
+					if (pfn_end == pfn - 1) {
+						pfn_end ++;
+						continue;
+					}
 				}
 			}
 
