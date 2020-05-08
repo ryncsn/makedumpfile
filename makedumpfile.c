@@ -86,6 +86,10 @@ static int end_cycle(mdf_pfn_t max, struct cycle *cycle)
 	for (first_cycle(start, max, C); !end_cycle(max, C); \
 	     update_cycle(max, C))
 
+static int show_progress(void) {
+	return !info->flag_mem_usage && !info->flag_mem_reuse;
+}
+
 /*
  * The numbers of the excluded pages
  */
@@ -1405,7 +1409,7 @@ open_dump_bitmap(void)
 
 	/* Unnecessary to open */
 	if (!info->working_dir && !info->flag_reassemble && !info->flag_refiltering
-	    && !info->flag_sadump && !info->flag_mem_usage && info->flag_cyclic)
+	    && !info->flag_sadump && !info->flag_mem_usage && !info->flag_mem_reuse && info->flag_cyclic)
 		return TRUE;
 
 	tmpname = getenv("TMPDIR");
@@ -4200,7 +4204,7 @@ out:
 		return FALSE;
 
 	if (info->working_dir || info->flag_reassemble || info->flag_refiltering
-	    || info->flag_sadump || info->flag_mem_usage) {
+	    || info->flag_sadump || info->flag_mem_usage || info->flag_mem_reuse) {
 		/* Can be done in 1-cycle by using backing file. */
 		info->flag_cyclic = FALSE;
 		info->pfn_cyclic = info->max_mapnr;
@@ -5696,7 +5700,7 @@ create_1st_bitmap_file(void)
 	pfn_bitmap1 = 0;
 	for (i = 0; get_pt_load(i, &phys_start, &phys_end, NULL, NULL); i++) {
 
-		if (!info->flag_mem_usage)
+		if (show_progress())
 			print_progress(PROGRESS_HOLES, i, num_pt_loads, NULL);
 
 		pfn_start = paddr_to_pfn(phys_start);
@@ -5718,7 +5722,7 @@ create_1st_bitmap_file(void)
 	/*
 	 * print 100 %
 	 */
-	if (!info->flag_mem_usage) {
+	if (show_progress()) {
 		print_progress(PROGRESS_HOLES, info->max_mapnr, info->max_mapnr, NULL);
 		print_execution_time(PROGRESS_HOLES, &ts_start);
 	}
@@ -6107,13 +6111,13 @@ __exclude_unnecessary_pages(unsigned long mem_map,
 		/*
 		 * Exclude the hwpoison page.
 		 */
-		else if (isHWPOISON(flags)) {
+		else if (isHWPOISON(flags) && !info->flag_mem_reuse) {
 			pfn_counter = &pfn_hwpoison;
 		}
 		/*
 		 * Exclude pages that are logically offline.
 		 */
-		else if (isOffline(flags, _mapcount)) {
+		else if (isOffline(flags, _mapcount) && !info->flag_mem_reuse) {
 			pfn_counter = &pfn_offline;
 		}
 		/*
@@ -6153,7 +6157,7 @@ exclude_unnecessary_pages(struct cycle *cycle)
 
 	for (mm = 0; mm < info->num_mem_map; mm++) {
 
-		if (!info->flag_mem_usage)
+		if (show_progress())
 			print_progress(PROGRESS_UNN_PAGES, mm, info->num_mem_map, NULL);
 
 		mmd = &info->mem_map_data[mm];
@@ -6171,7 +6175,7 @@ exclude_unnecessary_pages(struct cycle *cycle)
 	/*
 	 * print [100 %]
 	 */
-	if (!info->flag_mem_usage) {
+	if (show_progress()) {
 		print_progress(PROGRESS_UNN_PAGES, info->num_mem_map, info->num_mem_map, NULL);
 		print_execution_time(PROGRESS_UNN_PAGES, &ts_start);
 	}
@@ -6608,7 +6612,7 @@ create_2nd_bitmap(struct cycle *cycle)
 	/*
 	 * Exclude Xen user domain.
 	 */
-	if (info->flag_exclude_xen_dom) {
+	if (info->flag_exclude_xen_dom && !info->flag_mem_reuse) {
 		if (!exclude_xen_user_domain()) {
 			ERRMSG("Can't exclude xen user domain.\n");
 			return FALSE;
@@ -6628,7 +6632,7 @@ create_2nd_bitmap(struct cycle *cycle)
 	 *	 due to reading each page two times, but it is necessary.
 	 */
 	if ((info->dump_level & DL_EXCLUDE_ZERO) &&
-	    (info->flag_elf_dumpfile || info->flag_mem_usage)) {
+	    (info->flag_elf_dumpfile || info->flag_mem_usage || info->flag_mem_reuse)) {
 		/*
 		 * 2nd-bitmap should be flushed at this time, because
 		 * exclude_zero_pages() checks 2nd-bitmap.
@@ -6646,7 +6650,7 @@ create_2nd_bitmap(struct cycle *cycle)
 		return FALSE;
 
 	/* --exclude-unused-vm means exclude vmemmap page structures for unused pages */
-	if (info->flag_excludevm) {
+	if (info->flag_excludevm && !info->flag_mem_reuse) {
 		if (!init_save_control())
 			return FALSE;
 		if (!find_unused_vmemmap_pages())
@@ -7397,6 +7401,69 @@ get_num_dumpable_cyclic_single(void)
 	}
 
 	return num_dumpable;
+}
+
+void
+print_reusable_cyclic_single(int count)
+{
+	mdf_pfn_t pfn, pfn_start = 0,  pfn_end = 0, swap;
+	struct cycle cycle = {0};
+
+	struct {
+		mdf_pfn_t pfn_start;
+		mdf_pfn_t pfn_end;
+	} reusable_area [count];
+	memset(reusable_area, 0, sizeof(reusable_area));
+
+	for_each_cycle(0, info->max_mapnr, &cycle) {
+		if (info->flag_cyclic) {
+			if (!create_2nd_bitmap(&cycle)) {
+				ERRMSG("Failed to create bitmap.\n");
+			}
+		}
+
+		for (pfn = cycle.start_pfn; pfn < cycle.end_pfn; pfn++) {
+			if (!is_dumpable(info->bitmap2, pfn, &cycle)) {
+				if (pfn_end == pfn - 1) {
+					pfn_end ++;
+					continue;
+				}
+			}
+
+			/* End of a continues reusable region */
+			pfn_end = round(pfn_end + 1, info->mem_reuse_align);
+			pfn_start = roundup(pfn_start, info->mem_reuse_align);
+
+			if (pfn_end > pfn_start) {
+				for (int i = 0; i < count; ++i) {
+					if (reusable_area[i].pfn_end - reusable_area[i].pfn_start < pfn_end - pfn_start) {
+						swap = reusable_area[i].pfn_end;
+						reusable_area[i].pfn_end = pfn_end;
+						pfn_end = swap;
+
+						swap = reusable_area[i].pfn_start;
+						reusable_area[i].pfn_start = pfn_start;
+						pfn_start = swap;
+					}
+				}
+			}
+
+			pfn_start = pfn_end = pfn;
+		}
+	}
+
+	MSG("Reuseable memory range:\n");
+	for (int i = 0; i < count; ++i) {
+		if (reusable_area[i].pfn_end - reusable_area[i].pfn_start == 0) {
+			if (i == 0)
+				MSG("- No reuseable memory area found. -\n");
+			break;
+		}
+
+		MSG("0x%llx - 0x%llx\n",
+				pfn_to_paddr(reusable_area[i].pfn_start),
+				pfn_to_paddr(reusable_area[i].pfn_end));
+	}
 }
 
 mdf_pfn_t
@@ -11040,11 +11107,12 @@ check_param_for_creating_dumpfile(int argc, char *argv[])
 		 */
 		info->name_memory   = argv[optind];
 
-	} else if ((argc == optind + 1) && info->flag_mem_usage) {
+	} else if ((argc == optind + 1) && (info->flag_mem_usage || info->flag_mem_reuse)) {
 		/*
 		* Parameter for showing the page number of memory
 		* in different use from.
 		*/
+		ERRMSG("%s\n", argv[optind]);
 		info->name_memory   = argv[optind];
 
 	} else
@@ -11295,7 +11363,7 @@ static int get_sys_kernel_vmcoreinfo(uint64_t *addr, uint64_t *len)
 	return TRUE;
 }
 
-int show_mem_usage(void)
+int show_mem(void)
 {
 	uint64_t vmcoreinfo_addr, vmcoreinfo_len;
 	struct cycle cycle = {0};
@@ -11345,11 +11413,14 @@ int show_mem_usage(void)
 	if (!create_2nd_bitmap(&cycle))
 		return FALSE;
 
-	info->num_dumpable = get_num_dumpable_cyclic();
+	if (info->flag_mem_usage) {
+		info->num_dumpable = get_num_dumpable_cyclic();
+		print_mem_usage();
+	} else if (info->flag_mem_reuse) {
+		print_reusable_cyclic_single(10);
+	}
 
 	free_bitmap_buffer();
-
-	print_mem_usage();
 
 	if (!close_files_for_creating_dumpfile())
 		return FALSE;
@@ -11392,6 +11463,7 @@ static struct option longopts[] = {
 	{"eppic", required_argument, NULL, OPT_EPPIC},
 	{"non-mmap", no_argument, NULL, OPT_NON_MMAP},
 	{"mem-usage", no_argument, NULL, OPT_MEM_USAGE},
+	{"mem-reusable", required_argument, NULL, OPT_MEM_REUSE},
 	{"splitblock-size", required_argument, NULL, OPT_SPLITBLOCK_SIZE},
 	{"work-dir", required_argument, NULL, OPT_WORKING_DIR},
 	{"num-threads", required_argument, NULL, OPT_NUM_THREADS},
@@ -11504,8 +11576,12 @@ main(int argc, char *argv[])
 			info->flag_partial_dmesg = 1;
 			break;
 		case OPT_MEM_USAGE:
-		       info->flag_mem_usage = 1;
-		       break;
+			info->flag_mem_usage = 1;
+			break;
+		case OPT_MEM_REUSE:
+			info->flag_mem_reuse = 1;
+			info->mem_reuse_align = atol(optarg);
+			break;
 		case OPT_COMPRESS_SNAPPY:
 			info->flag_compress = DUMP_DH_COMPRESSED_SNAPPY;
 			break;
@@ -11679,7 +11755,7 @@ main(int argc, char *argv[])
 
 		MSG("\n");
 		MSG("The dmesg log is saved to %s.\n", info->name_dumpfile);
-	} else if (info->flag_mem_usage) {
+	} else if (info->flag_mem_usage || info->flag_mem_reuse) {
 		if (!check_param_for_creating_dumpfile(argc, argv)) {
 			MSG("Commandline parameter is invalid.\n");
 			MSG("Try `makedumpfile --help' for more information.\n");
@@ -11698,7 +11774,7 @@ main(int argc, char *argv[])
 			goto out;
 		}
 
-		if (!show_mem_usage())
+		if (!show_mem())
 			goto out;
 	} else {
 		if (!check_param_for_creating_dumpfile(argc, argv)) {

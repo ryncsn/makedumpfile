@@ -1316,11 +1316,13 @@ struct DumpInfo {
 	int             flag_dmesg;          /* dump the dmesg log out of the vmcore file */
 	int             flag_partial_dmesg;  /* dmesg dump only from the last cleared index*/
 	int             flag_mem_usage;  /*show the page number of memory in different use*/
+	int		flag_mem_reuse;      /* show memory ranges that could be reused */
 	int		flag_use_printk_log; /* did we read printk_log symbol name? */
 	int		flag_nospace;	     /* the flag of "No space on device" error */
 	int		flag_vmemmap;        /* kernel supports vmemmap address space */
 	int		flag_excludevm;      /* -e - excluding unused vmemmap pages */
 	int		flag_use_count;      /* _refcount is named _count in struct page */
+	unsigned long	mem_reuse_align;     /* alignment of usable memory block */
 	unsigned long	vaddr_for_vtop;      /* virtual address for debugging */
 	long		page_size;           /* size of page */
 	long		page_shift;
@@ -2364,6 +2366,7 @@ struct elf_prstatus {
 #define OPT_NUM_THREADS         OPT_START+16
 #define OPT_PARTIAL_DMESG       OPT_START+17
 #define OPT_CHECK_PARAMS        OPT_START+18
+#define OPT_MEM_REUSE           OPT_START+19
 
 /*
  * Function Prototype.
